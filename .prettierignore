@@ -1,0 +1,10 @@
+node_modules
+android
+ios
+dist
+.bundle
+vendor
+*.lock
+.agent
+docs
+.agents
