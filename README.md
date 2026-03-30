@@ -68,8 +68,8 @@ For complete platform setup, troubleshooting, and build instructions:
 
 ## Build Commands
 
-- Android release build: `npm run android:build`
-- Android clean: `npm run android:clean`
+- Android release build: `npm run android-build`
+- Android clean: `npm run android-clean`
 
 iOS release builds are typically created from Xcode using archive/export workflows.
 

@@ -50,8 +50,8 @@ npm run android
 
 Optional:
 
-- Release APK/AAB build pipeline entry: `npm run android:build`
-- Clean Gradle output: `npm run android:clean`
+- Release APK/AAB build pipeline entry: `npm run android-build`
+- Clean Gradle output: `npm run android-clean`
 
 ## 6) Run on iOS
 
