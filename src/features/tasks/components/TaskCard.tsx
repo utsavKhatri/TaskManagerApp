@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef, useCallback } from 'react';
 import { View, Text, StyleSheet, Platform } from 'react-native';
 import { Pressable } from 'react-native-gesture-handler';
 import Animated, {
@@ -13,7 +13,9 @@ import Animated, {
 import { GripVertical, Check } from 'lucide-react-native';
 import { Task } from '../../../api/tasks';
 import { radius, spacing, typography, useTheme } from '../../../theme';
-import { CategoryPill } from './CategoryPill';
+
+/** Must match DraggableFlatList “long press to drag” expectation, without RNGH Pressable (it ends the touch stream). */
+const DRAG_ACTIVATE_MS = 200;
 
 interface TaskCardProps {
   task: Task;
@@ -34,6 +36,26 @@ export const TaskCard = ({
 }: TaskCardProps) => {
   const { colors, isDark } = useTheme();
   const isCompleted = task.status === 'completed';
+  const dragTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const cancelDragActivation = useCallback(() => {
+    if (dragTimerRef.current != null) {
+      clearTimeout(dragTimerRef.current);
+      dragTimerRef.current = null;
+    }
+  }, []);
+
+  const armDragActivation = useCallback(() => {
+    cancelDragActivation();
+    if (!onLongPress || disabled) return;
+    dragTimerRef.current = setTimeout(() => {
+      dragTimerRef.current = null;
+      onLongPress();
+    }, DRAG_ACTIVATE_MS);
+  }, [onLongPress, disabled, cancelDragActivation]);
+
+  useEffect(() => () => cancelDragActivation(), [cancelDragActivation]);
+
   const scale = useSharedValue(1);
   const reducedMotion = useReducedMotion();
   const skipCompletionAnim = useSharedValue(reducedMotion);
@@ -65,49 +87,46 @@ export const TaskCard = ({
     };
   });
 
-  const checkboxLabel = `${isCompleted ? 'Completed' : 'Not completed'}: ${
-    task.title
-  }`;
-  const categoryPart = task.category ? `, category ${task.category.name}` : '';
+  const checkboxLabel = `${isCompleted ? 'Completed' : 'Not completed'}: ${task.title
+    }`;
   const descriptionPart = task.description ? `. ${task.description}` : '';
   const descriptionText = task.description?.trim() ?? '';
-  const rowA11yLabel = `${task.title}${descriptionPart}${categoryPart}. ${
-    isCompleted ? 'Completed' : 'Pending'
-  }`;
+  const rowA11yLabel = `${task.title}${descriptionPart}. ${isCompleted ? 'Completed' : 'Pending'
+    }`;
 
   const railColor = isCompleted ? colors.success : colors.accent;
 
   const shadowStyle =
     Platform.OS === 'ios'
       ? {
-          shadowColor: isDark ? '#000' : colors.accent,
-          shadowOffset: { width: 0, height: isDragging ? 12 : 4 },
-          shadowOpacity: isDragging ? 0.25 : isDark ? 0.3 : 0.05,
-          shadowRadius: isDragging ? 16 : 12,
-        }
+        shadowColor: isDark ? '#000' : colors.accent,
+        shadowOffset: { width: 0, height: isDragging ? 12 : 4 },
+        shadowOpacity: isDragging ? 0.25 : isDark ? 0.3 : 0.05,
+        shadowRadius: isDragging ? 16 : 12,
+      }
       : { elevation: isDragging ? 4 : isCompleted ? 0 : 2 };
 
   const shadowContainer = isDragging
     ? shadowStyle
     : !isCompleted
-    ? shadowStyle
-    : undefined;
+      ? shadowStyle
+      : undefined;
 
   const cardBg = isDragging
     ? isDark
       ? colors.surfaceHighlight
       : colors.surfaceHighlight
     : isCompleted
-    ? colors.cardDone
-    : colors.card;
+      ? colors.cardDone
+      : colors.card;
 
   const borderCol = isDragging
     ? colors.accent
     : isCompleted
-    ? isDark
-      ? 'rgba(76, 175, 131, 0.25)'
-      : 'rgba(47, 125, 78, 0.20)'
-    : colors.border;
+      ? isDark
+        ? 'rgba(76, 175, 131, 0.25)'
+        : 'rgba(47, 125, 78, 0.20)'
+      : colors.border;
 
   return (
     <View
@@ -122,14 +141,17 @@ export const TaskCard = ({
       ]}
       accessible={false}
     >
-      <Pressable
-        onLongPress={onLongPress}
-        delayLongPress={200}
-        disabled={!onLongPress || disabled}
-        hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+      <View
         style={styles.dragPressable}
+        collapsable={false}
+        onTouchStart={armDragActivation}
+        onTouchEnd={cancelDragActivation}
+        onTouchCancel={cancelDragActivation}
+        pointerEvents={!onLongPress || disabled ? 'none' : 'auto'}
+        accessible={!!onLongPress}
         accessibilityRole="button"
         accessibilityLabel="Reorder task"
+        accessibilityHint="Hold, then drag vertically to reorder this task"
       >
         <View style={styles.dragZone} collapsable={false} accessible={false}>
           {isCompleted ? (
@@ -151,13 +173,13 @@ export const TaskCard = ({
                 isCompleted
                   ? colors.textTertiary
                   : isDragging
-                  ? colors.accent
-                  : colors.textSecondary
+                    ? colors.accent
+                    : colors.textSecondary
               }
             />
           </View>
         </View>
-      </Pressable>
+      </View>
       {!isDragging ? (
         <Pressable
           onPress={() => onToggleStatus(task)}
@@ -178,8 +200,6 @@ export const TaskCard = ({
               {
                 borderColor: isCompleted
                   ? colors.success
-                  : isDragging
-                  ? colors.border
                   : colors.textTertiary,
                 backgroundColor: isCompleted ? colors.success : 'transparent',
               },
@@ -214,15 +234,17 @@ export const TaskCard = ({
                 color: isCompleted ? colors.completedTitle : colors.textPrimary,
               },
               isCompleted && styles.completedText,
+              Platform.OS === 'android' && styles.titleAndroid,
             ]}
-            numberOfLines={isDragging ? 1 : 2}
+            numberOfLines={2}
             ellipsizeMode="tail"
             accessible={false}
+            maxFontSizeMultiplier={1.65}
           >
             {task.title}
           </Text>
 
-          {!isDragging && descriptionText ? (
+          {descriptionText ? (
             <Text
               style={[
                 styles.description,
@@ -231,20 +253,17 @@ export const TaskCard = ({
                     ? colors.completedBody
                     : colors.textSecondary,
                 },
+                Platform.OS === 'android' && styles.descriptionAndroid,
               ]}
               numberOfLines={3}
               ellipsizeMode="tail"
               accessible={false}
+              maxFontSizeMultiplier={1.65}
             >
               {descriptionText}
             </Text>
           ) : null}
 
-          {!isDragging && task.category ? (
-            <View style={styles.categoryContainer} accessible={false}>
-              <CategoryPill category={task.category} small />
-            </View>
-          ) : null}
         </View>
       </Pressable>
     </View>
@@ -259,20 +278,21 @@ const styles = StyleSheet.create({
     paddingRight: spacing.m,
     paddingVertical: spacing.s + 2,
     borderRadius: radius.l,
-    marginBottom: spacing.m,
     borderWidth: 1.5,
     minHeight: 80,
   },
   containerDragging: {
     width: '90%',
     alignSelf: 'center',
+    overflow: 'visible',
     paddingVertical: spacing.xs,
-    maxHeight: 56,
-    transform: [{ scale: 1.01 }, { translateY: 4 }],
+    transform: [{ scale: 1.01 }, { translateY: 2 }],
   },
   dragPressable: {
     alignSelf: 'stretch',
-    paddingTop: 8,
+    justifyContent: 'flex-start',
+    paddingVertical: 8,
+    paddingRight: 2,
   },
   dragZone: {
     flexDirection: 'row',
@@ -312,6 +332,8 @@ const styles = StyleSheet.create({
   },
   contentWrap: {
     flex: 1,
+    minWidth: 0,
+    flexShrink: 1,
     justifyContent: 'flex-start',
     paddingVertical: 2,
     alignItems: 'flex-start',
@@ -319,6 +341,8 @@ const styles = StyleSheet.create({
   },
   textBlock: {
     gap: 4,
+    width: '100%',
+    minWidth: 0,
   },
   title: {
     ...typography.body,
@@ -326,14 +350,17 @@ const styles = StyleSheet.create({
     fontSize: 16,
     lineHeight: 22,
   },
+  titleAndroid: {
+    includeFontPadding: false,
+    textAlignVertical: 'center',
+  },
   description: {
     ...typography.caption,
     fontSize: 14,
     lineHeight: 20,
   },
-  categoryContainer: {
-    alignSelf: 'flex-start',
-    marginTop: 4,
+  descriptionAndroid: {
+    includeFontPadding: false,
   },
   completedText: {
     textDecorationLine: 'line-through',

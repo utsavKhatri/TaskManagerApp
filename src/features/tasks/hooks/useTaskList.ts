@@ -130,11 +130,7 @@ export const useTaskList = () => {
   }, []);
 
   const handleSubmitTask = useCallback(
-    async (
-      title: string,
-      description: string,
-      categoryId: string | null,
-    ) => {
+    async (title: string, description: string) => {
       if (!user) return;
 
       if (editingTask) {
@@ -143,7 +139,7 @@ export const useTaskList = () => {
             id: editingTask.id,
             title,
             description,
-            category_id: categoryId,
+            category_id: null,
           },
           {
             onSuccess: () => {
@@ -161,7 +157,7 @@ export const useTaskList = () => {
             user_id: user.id,
             status: 'pending',
             prioriy: 'medium',
-            category_id: categoryId,
+            category_id: null,
           },
           {
             onSuccess: () => {
@@ -186,9 +182,22 @@ export const useTaskList = () => {
   const handleToggleStatus = useCallback(
     (task: Task) => {
       const newStatus = task.status === 'completed' ? 'pending' : 'completed';
-      updateTaskMutation.mutate({ id: task.id, status: newStatus });
+      updateTaskMutation.mutate(
+        { id: task.id, status: newStatus },
+        {
+          onSuccess: () => {
+            showToast(
+              newStatus === 'completed'
+                ? 'Task marked complete'
+                : 'Task marked as pending',
+              'success',
+            );
+          },
+          onError: err => showToast(err.message, 'error'),
+        },
+      );
     },
-    [updateTaskMutation],
+    [updateTaskMutation, showToast],
   );
 
   const handleDelete = useCallback(
@@ -232,17 +241,14 @@ export const useTaskList = () => {
       // 1. Update local state immediately
       setOrderedTasks(currentTasks);
 
-      // 2. Calculate updates
-      const updates: { id: string; position: number }[] = [];
+      // 2. Full position list so cache + server stay consistent with the row order
+      const updates = currentTasks.map((task, index) => ({
+        id: task.id,
+        position: index,
+      }));
 
-      currentTasks.forEach((task, index) => {
-        if (task.position !== index) {
-          updates.push({ id: task.id, position: index });
-        }
-      });
-
-      // 3. Sync with server
-      if (updates.length > 0) {
+      // 3. Sync with server (RPC accepts full or partial; full avoids drift)
+      if (updates.some((u, i) => currentTasks[i]?.position !== u.position)) {
         updateTaskPositionsMutation.mutate(updates);
       }
     },

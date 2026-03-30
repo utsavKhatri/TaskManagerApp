@@ -15,7 +15,7 @@ interface InputProps extends TextInputProps {
 
 export const Input = forwardRef<TextInput, InputProps>(
   ({ label, error, style, accessibilityLabel, ...props }, ref) => {
-    const { colors } = useTheme();
+    const { colors, isDark } = useTheme();
     const [focused, setFocused] = useState(false);
     const { multiline, onFocus, onBlur } = props;
     const fieldLabel = accessibilityLabel ?? label ?? props.placeholder;
@@ -26,7 +26,7 @@ export const Input = forwardRef<TextInput, InputProps>(
       ? colors.error
       : focused
         ? colors.accent
-        : colors.border;
+        : colors.inputBorder;
 
     const handleFocus = useCallback(
       (e: Parameters<NonNullable<TextInputProps['onFocus']>>[0]) => {
@@ -63,7 +63,9 @@ export const Input = forwardRef<TextInput, InputProps>(
             styles.input,
             {
               color: colors.textPrimary,
-              backgroundColor: colors.card,
+              backgroundColor: isDark
+                ? colors.surfaceHighlight
+                : colors.card,
               borderColor,
             },
             multiline && styles.multilineInput,

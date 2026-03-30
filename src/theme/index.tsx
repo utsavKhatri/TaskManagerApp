@@ -24,6 +24,8 @@ const lightPalette = {
   // Accents
   accent: '#B45309', // Burnt Copper
   border: '#E6D3C1', // Warm neutral divider
+  /** `TextInput` / form fields (unfocused); must read on `card` */
+  inputBorder: '#D2C2B3',
 
   // Functional
   success: '#2F7D4E', // Muted green (not loud)
@@ -50,7 +52,9 @@ const darkPalette = {
 
   // Accents
   accent: '#D97706', // Warm copper glow
-  border: '#3A2A1F', // Deep warm border
+  border: '#3A2A1F', // Deep warm divider (lists, chrome)
+  /** Visible on `card` / sheets — `border` is too low-contrast for inputs */
+  inputBorder: 'rgba(255, 255, 255, 0.22)',
 
   // Functional
   success: '#4CAF83', // Soft emerald

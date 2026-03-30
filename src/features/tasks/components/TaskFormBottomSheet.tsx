@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import {
   Modal,
   View,
@@ -7,10 +7,10 @@ import {
   Platform,
   Text,
   Animated,
-  Dimensions,
   PanResponder,
   Keyboard,
   ScrollView,
+  useWindowDimensions,
 } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { Input } from '../../../components/Input';
@@ -23,24 +23,16 @@ import {
   getModalSafeBottomInset,
 } from '../../../theme';
 import { Task } from '../../../api/tasks';
-
-import { CategorySelector } from './CategorySelector';
-import { useCategories } from '../hooks/useTasks';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTaskScreenLayout } from '../hooks/useTaskScreenLayout';
 
 interface TaskFormBottomSheetProps {
   visible: boolean;
   onClose: () => void;
-  onSubmit: (
-    title: string,
-    description: string,
-    categoryId: string | null,
-  ) => void;
+  onSubmit: (title: string, description: string) => void;
   initialData?: Task | null;
   loading?: boolean;
 }
-
-const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 export const TaskFormBottomSheet = ({
   visible,
@@ -53,13 +45,10 @@ export const TaskFormBottomSheet = ({
   const [description, setDescription] = useState('');
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
+  const { isCompact, maxListContentWidth, isTablet } = useTaskScreenLayout();
 
-  const { data: categories } = useCategories();
-  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(
-    null,
-  );
-
-  const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
+  const slideAnim = useRef(new Animated.Value(windowHeight)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
   const isClosing = useRef(false);
@@ -71,10 +60,9 @@ export const TaskFormBottomSheet = ({
       // Reset state when opening
       setTitle(initialData?.title || '');
       setDescription(initialData?.description || '');
-      setSelectedCategoryId(initialData?.category_id || null);
       isClosing.current = false;
 
-      slideAnim.setValue(SCREEN_HEIGHT);
+      slideAnim.setValue(windowHeight);
       fadeAnim.setValue(0);
       Animated.parallel([
         Animated.spring(slideAnim, {
@@ -91,16 +79,16 @@ export const TaskFormBottomSheet = ({
         }),
       ]).start();
     }
-  }, [visible, initialData, slideAnim, fadeAnim]);
+  }, [visible, initialData, slideAnim, fadeAnim, windowHeight]);
 
-  const handleClose = () => {
+  const handleClose = useCallback(() => {
     if (isClosing.current) return;
     isClosing.current = true;
     Keyboard.dismiss();
 
     Animated.parallel([
       Animated.timing(slideAnim, {
-        toValue: SCREEN_HEIGHT,
+        toValue: windowHeight,
         duration: 250,
         useNativeDriver: true,
       }),
@@ -112,44 +100,49 @@ export const TaskFormBottomSheet = ({
     ]).start(() => {
       onClose();
     });
-  };
+  }, [windowHeight, slideAnim, fadeAnim, onClose]);
 
   const handleSubmit = () => {
     if (!title.trim()) return;
-    onSubmit(title, description, selectedCategoryId);
+    onSubmit(title, description);
   };
 
-  // Simple PanResponder for swipe-down-to-close
-  const panResponder = useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponder: (_, gestureState) => {
-        return gestureState.dy > 10;
-      },
-      onPanResponderMove: (_, gestureState) => {
-        if (gestureState.dy > 0) {
-          slideAnim.setValue(gestureState.dy);
-        }
-      },
-      onPanResponderRelease: (_, gestureState) => {
-        if (gestureState.dy > 100) {
-          handleClose();
-        } else {
-          // Spring back
-          Animated.spring(slideAnim, {
-            toValue: 0,
-            useNativeDriver: true,
-            friction: 8,
-            tension: 64,
-          }).start();
-        }
-      },
-    }),
-  ).current;
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_, gestureState) => {
+          return gestureState.dy > 10;
+        },
+        onPanResponderMove: (_, gestureState) => {
+          if (gestureState.dy > 0) {
+            slideAnim.setValue(gestureState.dy);
+          }
+        },
+        onPanResponderRelease: (_, gestureState) => {
+          if (gestureState.dy > 100) {
+            handleClose();
+          } else {
+            Animated.spring(slideAnim, {
+              toValue: 0,
+              useNativeDriver: true,
+              friction: 8,
+              tension: 64,
+            }).start();
+          }
+        },
+      }),
+    [handleClose, slideAnim],
+  );
 
   if (!visible) return null;
 
   const sheetBottomPad =
     getModalSafeBottomInset(insets.bottom) + spacing.l;
+  const sheetMaxHeight = Math.min(
+    windowHeight * 0.9,
+    windowHeight - Math.max(insets.top, spacing.m),
+  );
+  const sheetPadH = isCompact ? spacing.m : spacing.l;
 
   return (
     <Modal
@@ -189,6 +182,11 @@ export const TaskFormBottomSheet = ({
               backgroundColor: colors.card,
               transform: [{ translateY: slideAnim }],
               paddingBottom: sheetBottomPad,
+              paddingHorizontal: sheetPadH,
+              maxHeight: sheetMaxHeight,
+              maxWidth: isTablet ? maxListContentWidth : undefined,
+              width: '100%',
+              alignSelf: isTablet ? 'center' : undefined,
             },
           ]}
         >
@@ -229,14 +227,6 @@ export const TaskFormBottomSheet = ({
                 blurOnSubmit={false}
               />
 
-              {categories && categories.length > 0 && (
-                <CategorySelector
-                  categories={categories}
-                  selectedId={selectedCategoryId}
-                  onSelect={setSelectedCategoryId}
-                />
-              )}
-
               <Input
                 ref={descriptionRef}
                 label="Description (Optional)"
@@ -245,12 +235,14 @@ export const TaskFormBottomSheet = ({
                 onChangeText={setDescription}
                 multiline
                 numberOfLines={3}
-                style={styles.textArea}
+                style={[styles.textArea, isCompact && styles.textAreaCompact]}
                 accessibilityLabel="Task Description"
               />
             </View>
 
-            <View style={styles.footer}>
+            <View
+              style={[styles.footer, isCompact && styles.footerStack]}
+            >
               <Button
                 title="Cancel"
                 variant="ghost"
@@ -285,7 +277,6 @@ const styles = StyleSheet.create({
   sheetContainer: {
     borderTopLeftRadius: radius.l + 2,
     borderTopRightRadius: radius.l + 2,
-    paddingHorizontal: spacing.l,
     paddingTop: spacing.s,
     paddingBottom: 0,
     shadowColor: '#000',
@@ -296,7 +287,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.12,
     shadowRadius: 16,
     elevation: 24,
-    maxHeight: '90%',
   },
   dragHandleContainer: {
     alignItems: 'center',
@@ -325,12 +315,18 @@ const styles = StyleSheet.create({
     gap: spacing.m,
   },
   textArea: {
-    height: 80,
+    minHeight: 80,
     textAlignVertical: 'top',
+  },
+  textAreaCompact: {
+    minHeight: 64,
   },
   footer: {
     flexDirection: 'row',
     gap: spacing.m,
+  },
+  footerStack: {
+    flexDirection: 'column',
   },
   cancelButton: {
     flex: 1,

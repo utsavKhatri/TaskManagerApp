@@ -1,5 +1,5 @@
 import React, { useCallback, useRef } from 'react';
-import { Text, StyleSheet, View } from 'react-native';
+import { Text, StyleSheet, View, Platform } from 'react-native';
 import { Pressable } from 'react-native-gesture-handler';
 import { ScaleDecorator } from 'react-native-draggable-flatlist';
 import Swipeable, {
@@ -10,6 +10,7 @@ import { TaskCard } from './TaskCard';
 import { radius, spacing, useTheme } from '../../../theme';
 import { Task } from '../../../api/tasks';
 import { SharedValue } from 'react-native-reanimated';
+import { useTaskScreenLayout } from '../hooks/useTaskScreenLayout';
 
 interface SwipeableTaskItemProps {
   item: Task;
@@ -33,6 +34,7 @@ export const SwipeableTaskItem = React.memo(
     disabled = false,
   }: SwipeableTaskItemProps & { disableScaleDecorator?: boolean }) => {
     const { colors } = useTheme();
+    const { swipeDeleteRailWidth } = useTaskScreenLayout();
     const swipeableRef = useRef<SwipeableMethods | null>(null);
 
     const requestDeleteConfirm = useCallback(() => {
@@ -47,7 +49,12 @@ export const SwipeableTaskItem = React.memo(
       _swipeableMethods: SwipeableMethods,
     ) => {
       return (
-        <View style={styles.deleteActionWrap}>
+        <View
+          style={[
+            styles.deleteActionWrap,
+            { width: swipeDeleteRailWidth },
+          ]}
+        >
           <Pressable
             style={({ pressed }) => [
               styles.deleteAction,
@@ -60,13 +67,10 @@ export const SwipeableTaskItem = React.memo(
             accessibilityHint="Removes this task after you confirm in the dialog"
           >
             <View style={styles.deleteIconBubble}>
-              <Trash2 size={16} color="#FFFFFF" strokeWidth={2.2} />
+              <Trash2 size={15} color="#FFFFFF" strokeWidth={2.2} />
             </View>
             <Text style={styles.deleteActionText} accessible={false}>
               Delete
-            </Text>
-            <Text style={styles.deleteActionSubText} accessible={false}>
-              Confirm
             </Text>
           </Pressable>
         </View>
@@ -85,24 +89,33 @@ export const SwipeableTaskItem = React.memo(
     );
 
     return (
-      <Swipeable
-        ref={swipeableRef}
-        enabled={!disabled}
-        renderRightActions={renderRightActions}
-        rightThreshold={42}
-        overshootRight={false}
-        onSwipeableOpen={direction => {
-          if (direction === 'right') {
-            requestDeleteConfirm();
-          }
-        }}
-      >
-        {disableScaleDecorator ? (
-          content
-        ) : (
-          <ScaleDecorator>{content}</ScaleDecorator>
-        )}
-      </Swipeable>
+      <View style={styles.itemRowSpacing}>
+        <Swipeable
+          ref={swipeableRef}
+          enabled={!disabled}
+          renderRightActions={renderRightActions}
+          rightThreshold={42}
+          overshootRight={false}
+          onSwipeableOpen={direction => {
+            if (direction === 'right') {
+              requestDeleteConfirm();
+            }
+          }}
+        >
+          {disableScaleDecorator ? (
+            content
+          ) : (
+            <ScaleDecorator
+              /* Large scales exceed the cell's laid-out rect on Android and clip. */
+              activeScale={Platform.OS === 'android' ? 1 : 1.06}
+            >
+              <View style={styles.dragMeasureWrap} collapsable={false}>
+                {content}
+              </View>
+            </ScaleDecorator>
+          )}
+        </Swipeable>
+      </View>
     );
   },
   (prev, next) => {
@@ -114,12 +127,7 @@ export const SwipeableTaskItem = React.memo(
       a.description === b.description &&
       a.status === b.status &&
       a.position === b.position &&
-      a.category_id === b.category_id &&
       a.created_at === b.created_at &&
-      (a.category?.id ?? null) === (b.category?.id ?? null) &&
-      (a.category?.name ?? null) === (b.category?.name ?? null) &&
-      (a.category?.color ?? null) === (b.category?.color ?? null) &&
-      (a.category?.icon ?? null) === (b.category?.icon ?? null) &&
       prev.isActive === next.isActive &&
       prev.disableScaleDecorator === next.disableScaleDecorator &&
       prev.disabled === next.disabled
@@ -128,33 +136,37 @@ export const SwipeableTaskItem = React.memo(
 );
 
 const styles = StyleSheet.create({
+  /** Spacing between list rows lives outside Swipeable so action height matches the card, not card+gap. */
+  itemRowSpacing: {
+    marginBottom: spacing.m,
+  },
+  dragMeasureWrap: {
+    overflow: 'visible',
+  },
   deleteActionWrap: {
-    justifyContent: 'center',
-    alignItems: 'center',
-    width: 104,
-    marginBottom: spacing.s,
+    alignSelf: 'stretch',
   },
   deleteAction: {
-    width: 88,
-    borderRadius: radius.m + 2,
+    flex: 1,
+    alignSelf: 'stretch',
+    borderRadius: radius.l,
+    marginLeft: spacing.s,
     justifyContent: 'center',
     alignItems: 'center',
-    minWidth: 88,
-    height: '100%',
-    gap: 2,
+    gap: 1,
+    paddingVertical: spacing.xs,
   },
   deleteActionPressed: {
     opacity: 0.84,
     transform: [{ scale: 0.98 }],
   },
   deleteIconBubble: {
-    width: 24,
-    height: 24,
+    width: 22,
+    height: 22,
     borderRadius: 999,
     backgroundColor: 'rgba(255,255,255,0.18)',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 2,
   },
   deleteActionText: {
     color: 'white',

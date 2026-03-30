@@ -1,6 +1,7 @@
 import React, { createContext, useEffect, useState, ReactNode } from 'react';
 import { Session, User } from '@supabase/supabase-js';
 import { supabase } from '../../api/supabase';
+import { TasksRealtimeSync } from '../tasks/hooks/TasksRealtimeSync';
 
 interface AuthContextType {
   session: Session | null;
@@ -58,5 +59,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     signOut,
   };
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  return (
+    <AuthContext.Provider value={value}>
+      <TasksRealtimeSync />
+      {children}
+    </AuthContext.Provider>
+  );
 };

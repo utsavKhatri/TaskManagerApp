@@ -6,17 +6,19 @@ import { spacing, typography, radius, useTheme } from '../../../theme';
 interface TaskListControlsProps {
   searchQuery: string;
   setSearchQuery: (query: string) => void;
+  horizontalPadding: number;
 }
 
 export const TaskListControls = ({
   searchQuery,
   setSearchQuery,
+  horizontalPadding,
 }: TaskListControlsProps) => {
   const { colors } = useTheme();
   const [focused, setFocused] = useState(false);
 
   return (
-    <View style={styles.controls}>
+    <View style={[styles.controls, { paddingHorizontal: horizontalPadding }]}>
       <View
         style={[
           styles.searchShell,
@@ -44,6 +46,7 @@ export const TaskListControls = ({
           <TextInput
             style={[styles.searchInput, { color: colors.textPrimary }]}
             placeholder="Search your tasks…"
+            maxFontSizeMultiplier={1.5}
             placeholderTextColor={colors.textTertiary}
             value={searchQuery}
             onChangeText={setSearchQuery}
@@ -79,7 +82,6 @@ export const TaskListControls = ({
 
 const styles = StyleSheet.create({
   controls: {
-    paddingHorizontal: spacing.xl,
     paddingBottom: spacing.l,
   },
   searchShell: {
@@ -110,6 +112,7 @@ const styles = StyleSheet.create({
   },
   searchInner: {
     flex: 1,
+    minWidth: 0,
     flexDirection: 'row',
     alignItems: 'center',
     paddingRight: spacing.s,
@@ -126,6 +129,7 @@ const styles = StyleSheet.create({
   },
   searchInput: {
     flex: 1,
+    minWidth: 0,
     ...typography.body,
     minHeight: 40,
     paddingVertical: 0,

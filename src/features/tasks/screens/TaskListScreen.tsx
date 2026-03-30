@@ -25,17 +25,16 @@ import { useTaskList } from '../hooks/useTaskList';
 import { TaskListControls } from '../components/TaskListControls';
 import { SwipeableTaskItem } from '../components/SwipeableTaskItem';
 import { TaskSkeleton } from '../components/TaskSkeleton';
+import { useTaskScreenLayout } from '../hooks/useTaskScreenLayout';
 
 // Stable no-op function to prevent unnecessary re-renders when drag is disabled
 const NO_OP = () => {};
-
-// Estimated item height for getItemLayout (compact cards + margin)
-const ITEM_HEIGHT = 88;
 
 export const TaskListScreen = () => {
   const { signOut } = useAuth();
   const { colors, isDark } = useTheme();
   const insets = useSafeAreaInsets();
+  const layout = useTaskScreenLayout();
   const netInfo = useNetInfo();
   const isOffline = netInfo.isConnected === false && netInfo.type !== 'unknown';
 
@@ -127,16 +126,6 @@ export const TaskListScreen = () => {
     />
   ) : null;
 
-  // getItemLayout for performance boost
-  const getItemLayout = useCallback(
-    (_data: any, index: number) => ({
-      length: ITEM_HEIGHT,
-      offset: ITEM_HEIGHT * index,
-      index,
-    }),
-    [],
-  );
-
   const handleEndReached = useCallback(() => {
     if (hasNextPage && !isFetchingNextPage) {
       fetchNextPage();
@@ -171,21 +160,28 @@ export const TaskListScreen = () => {
           dateBadgeLabel={dateBadgeLabel}
           onOpenDateFilter={openDateFilter}
           onSignOut={signOut}
+          horizontalPadding={layout.horizontalPadding}
+          titleFontSize={layout.headerTitleSize}
+          titleLineHeight={layout.headerTitleLineHeight}
         />
         <TaskListControls
           searchQuery={searchQuery}
           setSearchQuery={setSearchQuery}
+          horizontalPadding={layout.horizontalPadding}
         />
       </View>
 
       {isLoading ? (
-        <TaskSkeleton />
+        <TaskSkeleton horizontalPadding={layout.horizontalPadding} />
       ) : error ? (
         <Pressable
           onPress={onRefresh}
           accessibilityRole="button"
           accessibilityLabel="Error loading tasks. Double tap to try again."
-          style={styles.errorPressable}
+          style={[
+            styles.errorPressable,
+            { paddingHorizontal: layout.horizontalPadding },
+          ]}
         >
           <Text style={[styles.errorText, { color: colors.error }]}>
             Something went wrong loading tasks.
@@ -201,11 +197,21 @@ export const TaskListScreen = () => {
           keyExtractor={item => item.id}
           renderItem={renderSearchItem}
           getItemType={item => item.status}
-          drawDistance={420}
+          style={
+            layout.isTablet
+              ? {
+                  maxWidth: layout.maxListContentWidth,
+                  width: '100%',
+                  alignSelf: 'center',
+                }
+              : undefined
+          }
+          drawDistance={layout.flashListDrawDistance}
           contentContainerStyle={[
             styles.listContent,
             {
-              paddingBottom: insets.bottom + 100,
+              paddingHorizontal: layout.horizontalPadding,
+              paddingBottom: insets.bottom + layout.listBottomExtra,
             },
           ]}
           refreshControl={
@@ -224,10 +230,12 @@ export const TaskListScreen = () => {
           onDragEnd={handleDragEnd}
           keyExtractor={item => item.id}
           renderItem={renderDraggableItem}
+          style={layout.isTablet ? { maxWidth: layout.maxListContentWidth, width: '100%', alignSelf: 'center' } : undefined}
           contentContainerStyle={[
             styles.listContent,
             {
-              paddingBottom: insets.bottom + 100,
+              paddingHorizontal: layout.horizontalPadding,
+              paddingBottom: insets.bottom + layout.listBottomExtra,
             },
           ]}
           refreshControl={
@@ -242,10 +250,8 @@ export const TaskListScreen = () => {
           onEndReachedThreshold={0.5}
           ListFooterComponent={ListFooter}
           windowSize={11}
-          removeClippedSubviews
           initialNumToRender={10}
           maxToRenderPerBatch={10}
-          getItemLayout={getItemLayout}
         />
       )}
 
@@ -284,12 +290,10 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   listContent: {
-    paddingHorizontal: spacing.xl,
     paddingTop: spacing.m,
     flexGrow: 1,
   },
   errorPressable: {
-    paddingHorizontal: spacing.xl,
     paddingVertical: spacing.l,
     alignItems: 'center',
   },

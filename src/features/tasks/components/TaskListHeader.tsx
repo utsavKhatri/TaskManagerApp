@@ -7,17 +7,23 @@ interface TaskListHeaderProps {
   dateBadgeLabel: string;
   onOpenDateFilter: () => void;
   onSignOut: () => void;
+  horizontalPadding: number;
+  titleFontSize: number;
+  titleLineHeight: number;
 }
 
 export const TaskListHeader = ({
   dateBadgeLabel,
   onOpenDateFilter,
   onSignOut,
+  horizontalPadding,
+  titleFontSize,
+  titleLineHeight,
 }: TaskListHeaderProps) => {
   const { colors } = useTheme();
 
   return (
-    <View style={styles.wrap}>
+    <View style={[styles.wrap, { paddingHorizontal: horizontalPadding }]}>
       <View style={styles.topRow}>
         <Pressable
           onPress={onOpenDateFilter}
@@ -42,7 +48,9 @@ export const TaskListHeader = ({
           />
           <Text
             numberOfLines={1}
+            ellipsizeMode="tail"
             style={[styles.dateText, { color: colors.textSecondary }]}
+            maxFontSizeMultiplier={1.5}
           >
             {dateBadgeLabel}
           </Text>
@@ -69,7 +77,17 @@ export const TaskListHeader = ({
       <View style={styles.titleRow}>
         {/* <View style={[styles.accentBar, { backgroundColor: colors.accent }]} /> */}
         <View style={styles.titleTextBlock}>
-          <Text style={[styles.title, { color: colors.textPrimary }]}>
+          <Text
+            style={[
+              styles.title,
+              {
+                color: colors.textPrimary,
+                fontSize: titleFontSize,
+                lineHeight: titleLineHeight,
+              },
+            ]}
+            maxFontSizeMultiplier={1.6}
+          >
             My tasks
           </Text>
         </View>
@@ -80,7 +98,6 @@ export const TaskListHeader = ({
 
 const styles = StyleSheet.create({
   wrap: {
-    paddingHorizontal: spacing.xl,
     paddingTop: spacing.s,
     paddingBottom: spacing.m,
   },
@@ -93,6 +110,7 @@ const styles = StyleSheet.create({
   },
   datePill: {
     flex: 1,
+    minWidth: 0,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.s,
@@ -114,6 +132,7 @@ const styles = StyleSheet.create({
   dateText: {
     ...typography.caption,
     flex: 1,
+    minWidth: 0,
     fontSize: 11,
     letterSpacing: 0.5,
     textTransform: 'uppercase',
@@ -131,6 +150,7 @@ const styles = StyleSheet.create({
   },
   titleTextBlock: {
     flex: 1,
+    minWidth: 0,
     justifyContent: 'center',
     paddingVertical: 2,
   },
@@ -143,9 +163,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   title: {
-    fontSize: 30,
     fontWeight: '700',
     letterSpacing: -0.6,
-    lineHeight: 36,
   },
 });

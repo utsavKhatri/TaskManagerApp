@@ -3,6 +3,8 @@ import {
   useMutation,
   useQueryClient,
   useQuery,
+  InfiniteData,
+  QueryKey,
 } from '@tanstack/react-query';
 import {
   fetchTasks,
@@ -15,18 +17,168 @@ import {
   TASKS_PAGE_LIMIT,
   fetchUserTaskDateBounds,
 } from '../../../api/tasks';
-import { fetchCategories } from '../../../api/categories';
 import { Task } from '../../../api/tasks';
 import {
   dayKeyToStartIso,
   dayKeyToEndIso,
+  isValidDayKey,
 } from '../utils/taskDateFilter';
 import type { TaskDateRange } from '../utils/taskDateFilter';
 
-const ALL_TASKS_KEY = ['tasks', 'all'] as const;
-
 export const tasksFilterKey = (range: TaskDateRange | null) =>
   range == null ? 'all' : `${range.start}_${range.end}`;
+
+type TasksInfiniteData = InfiniteData<Task[]>;
+
+const TASKS_ROOT_KEY = ['tasks'] as const;
+
+function isTasksInfiniteData(data: unknown): data is TasksInfiniteData {
+  return (
+    !!data &&
+    typeof data === 'object' &&
+    'pages' in data &&
+    Array.isArray((data as TasksInfiniteData).pages)
+  );
+}
+
+function repaginate(flat: Task[], limit: number): Task[][] {
+  if (flat.length === 0) return [[]];
+  const pages: Task[][] = [];
+  for (let i = 0; i < flat.length; i += limit) {
+    pages.push(flat.slice(i, i + limit));
+  }
+  return pages;
+}
+
+/** Whether a task belongs in a cached list for this query key (date filter). */
+function taskMatchesTasksQuery(queryKey: QueryKey, task: Task): boolean {
+  const suffix = queryKey[1];
+  if (suffix === 'all' || typeof suffix !== 'string') return true;
+  const idx = suffix.indexOf('_');
+  if (idx === -1) return true;
+  const startDay = suffix.slice(0, idx);
+  const endDay = suffix.slice(idx + 1);
+  if (!isValidDayKey(startDay) || !isValidDayKey(endDay)) return true;
+  const t = new Date(task.created_at).getTime();
+  const lo = new Date(dayKeyToStartIso(startDay)).getTime();
+  const hi = new Date(dayKeyToEndIso(endDay)).getTime();
+  return t >= lo && t <= hi;
+}
+
+function snapshotTaskCaches(
+  queryClient: ReturnType<typeof useQueryClient>,
+): [QueryKey, TasksInfiniteData | undefined][] {
+  return queryClient.getQueriesData<TasksInfiniteData>({ queryKey: TASKS_ROOT_KEY });
+}
+
+function restoreSnapshot(
+  queryClient: ReturnType<typeof useQueryClient>,
+  entries: [QueryKey, TasksInfiniteData | undefined][],
+) {
+  entries.forEach(([key, data]) => {
+    queryClient.setQueryData(key, data);
+  });
+}
+
+function setAllTaskCaches(
+  queryClient: ReturnType<typeof useQueryClient>,
+  updater: (
+    data: TasksInfiniteData,
+    queryKey: QueryKey,
+  ) => TasksInfiniteData | undefined,
+) {
+  const entries = queryClient.getQueriesData<TasksInfiniteData>({
+    queryKey: TASKS_ROOT_KEY,
+  });
+  entries.forEach(([queryKey, old]) => {
+    if (!old || !isTasksInfiniteData(old)) return;
+    const next = updater(old, queryKey);
+    if (next !== undefined) {
+      queryClient.setQueryData<TasksInfiniteData>(queryKey, next);
+    }
+  });
+}
+
+/** Replace temp optimistic id with server task; fix pagination. */
+function reconcileCreateSuccess(
+  queryClient: ReturnType<typeof useQueryClient>,
+  tempId: string,
+  serverTask: Task,
+) {
+  setAllTaskCaches(queryClient, (old, queryKey) => {
+    const flat = old.pages.flat().filter(t => t.id !== tempId && t.id !== serverTask.id);
+    const nextFlat = taskMatchesTasksQuery(queryKey, serverTask)
+      ? [...flat, serverTask].sort((a, b) => a.position - b.position)
+      : flat;
+    const pages = repaginate(nextFlat, TASKS_PAGE_LIMIT);
+    return {
+      pages,
+      pageParams: pages.map((_, i) => i),
+    };
+  });
+}
+
+function patchTaskInCaches(
+  queryClient: ReturnType<typeof useQueryClient>,
+  taskId: string,
+  patch: Partial<Task>,
+  serverTask?: Task,
+) {
+  const merged = serverTask;
+  setAllTaskCaches(queryClient, old => ({
+    ...old,
+    pages: old.pages.map(page =>
+      page.map(t => {
+        if (t.id !== taskId) return t;
+        return merged ? merged : { ...t, ...patch };
+      }),
+    ),
+  }));
+}
+
+function removeTaskFromCaches(queryClient: ReturnType<typeof useQueryClient>, taskId: string) {
+  setAllTaskCaches(queryClient, old => {
+    const flat = old.pages.flat().filter(t => t.id !== taskId);
+    const pages = repaginate(flat, TASKS_PAGE_LIMIT);
+    return {
+      pages,
+      pageParams: pages.map((_, i) => i),
+    };
+  });
+}
+
+function applyPositionUpdates(
+  old: TasksInfiniteData,
+  updates: { id: string; position: number }[],
+): TasksInfiniteData {
+  const pos = new Map(updates.map(u => [u.id, u.position]));
+  const flat = [...old.pages.flat()];
+  const sorted = flat.sort((a, b) => {
+    const pa = pos.get(a.id);
+    const pb = pos.get(b.id);
+    if (pa !== undefined && pb !== undefined) return pa - pb;
+    if (pa !== undefined) return -1;
+    if (pb !== undefined) return 1;
+    return a.position - b.position;
+  });
+  const remapped = sorted.map(t => {
+    const p = pos.get(t.id);
+    return p !== undefined ? { ...t, position: p } : t;
+  });
+  const pages = repaginate(remapped, TASKS_PAGE_LIMIT);
+  return {
+    pages,
+    pageParams: pages.map((_, i) => i),
+  };
+}
+
+const invalidateDateBounds = (queryClient: ReturnType<typeof useQueryClient>) => {
+  queryClient.invalidateQueries({ queryKey: ['task-date-bounds'] });
+};
+
+const markTasksStaleNoRefetch = (queryClient: ReturnType<typeof useQueryClient>) => {
+  queryClient.invalidateQueries({ queryKey: TASKS_ROOT_KEY, refetchType: 'none' });
+};
 
 export const useTasks = (dateRange: TaskDateRange | null) => {
   const filterKey = tasksFilterKey(dateRange);
@@ -45,7 +197,7 @@ export const useTasks = (dateRange: TaskDateRange | null) => {
       }),
     initialPageParam: 0,
     maxPages: 6,
-    staleTime: 30 * 1000,
+    staleTime: 60 * 1000,
     getNextPageParam: (lastPage, allPages) => {
       if (lastPage.length < TASKS_PAGE_LIMIT) return undefined;
       return allPages.length;
@@ -60,68 +212,51 @@ export const useTaskDateBounds = () =>
     staleTime: 5 * 60 * 1000,
   });
 
-export const useCategories = () => {
-  return useQuery({
-    queryKey: ['categories'],
-    queryFn: fetchCategories,
-  });
-};
-
-const invalidateTaskQueries = (queryClient: ReturnType<typeof useQueryClient>) => {
-  queryClient.invalidateQueries({ queryKey: ['tasks'] });
-  queryClient.invalidateQueries({ queryKey: ['task-date-bounds'] });
-};
-
 export const useCreateTask = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: (newTask: NewTask) => createTask(newTask),
     onMutate: async newTask => {
-      await queryClient.cancelQueries({ queryKey: ['tasks'] });
+      await queryClient.cancelQueries({ queryKey: TASKS_ROOT_KEY });
+      const previous = snapshotTaskCaches(queryClient);
+      const tempId = `temp-${Date.now()}`;
+      const optimisticTask: Task = {
+        id: tempId,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        is_deleted: false,
+        user_id: newTask.user_id,
+        title: newTask.title,
+        description: newTask.description ?? null,
+        status: newTask.status || 'pending',
+        prioriy: newTask.prioriy || 'medium',
+        category_id: newTask.category_id ?? null,
+        position: 0,
+      };
 
-      const previousTasks = queryClient.getQueryData<{
-        pages: Task[][];
-        pageParams: number[];
-      }>(ALL_TASKS_KEY);
+      setAllTaskCaches(queryClient, (old, queryKey) => {
+        if (!taskMatchesTasksQuery(queryKey, optimisticTask)) return old;
+        const flat = old.pages.flat().map(t => ({
+          ...t,
+          position: t.position + 1,
+        }));
+        const nextFlat = [optimisticTask, ...flat].sort((a, b) => a.position - b.position);
+        const pages = repaginate(nextFlat, TASKS_PAGE_LIMIT);
+        return { pages, pageParams: pages.map((_, i) => i) };
+      });
 
-      if (previousTasks) {
-        const optimisticTask: Task = {
-          id: 'temp-' + Date.now(),
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          is_deleted: false,
-          user_id: newTask.user_id,
-          title: newTask.title,
-          description: newTask.description || null,
-          status: newTask.status || 'pending',
-          prioriy: newTask.prioriy || 'medium',
-          category_id: newTask.category_id || null,
-          position: 0,
-        };
-
-        queryClient.setQueryData(ALL_TASKS_KEY, (old: any) => {
-          if (!old) return { pages: [[optimisticTask]], pageParams: [0] };
-          const newPages = [...old.pages];
-          if (newPages.length > 0) {
-            newPages[0] = [optimisticTask, ...newPages[0]];
-          } else {
-            newPages[0] = [optimisticTask];
-          }
-          return { ...old, pages: newPages };
-        });
-      }
-
-      return { previousTasks };
+      return { previous, tempId };
     },
-    onError: (err, newTodo, context) => {
-      console.error('Create Task Error:', err);
-      if (context?.previousTasks !== undefined) {
-        queryClient.setQueryData(ALL_TASKS_KEY, context.previousTasks);
+    onSuccess: (serverTask, _vars, ctx) => {
+      if (ctx?.tempId) {
+        reconcileCreateSuccess(queryClient, ctx.tempId, serverTask);
       }
+      invalidateDateBounds(queryClient);
+      markTasksStaleNoRefetch(queryClient);
     },
-    onSettled: () => {
-      invalidateTaskQueries(queryClient);
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.previous) restoreSnapshot(queryClient, ctx.previous);
     },
   });
 };
@@ -132,36 +267,24 @@ export const useUpdateTask = () => {
   return useMutation({
     mutationFn: (updatedTask: UpdateTask) => updateTask(updatedTask),
     onMutate: async updatedTask => {
-      await queryClient.cancelQueries({ queryKey: ['tasks'] });
-      const previousTasks = queryClient.getQueryData<{
-        pages: Task[][];
-        pageParams: number[];
-      }>(ALL_TASKS_KEY);
+      await queryClient.cancelQueries({ queryKey: TASKS_ROOT_KEY });
+      const previous = snapshotTaskCaches(queryClient);
+      if (!updatedTask.id) return { previous };
 
-      if (previousTasks) {
-        queryClient.setQueryData(ALL_TASKS_KEY, (old: any) => {
-          if (!old) return old;
-          return {
-            ...old,
-            pages: old.pages.map((page: Task[]) =>
-              page.map(task =>
-                task.id === updatedTask.id ? { ...task, ...updatedTask } : task,
-              ),
-            ),
-          };
-        });
-      }
-
-      return { previousTasks };
+      patchTaskInCaches(
+        queryClient,
+        updatedTask.id,
+        updatedTask as Partial<Task>,
+      );
+      return { previous };
     },
-    onError: (err, newTodo, context) => {
-      console.error('Update Task Error:', err);
-      if (context?.previousTasks !== undefined) {
-        queryClient.setQueryData(ALL_TASKS_KEY, context.previousTasks);
-      }
+    onSuccess: data => {
+      patchTaskInCaches(queryClient, data.id, {}, data);
+      invalidateDateBounds(queryClient);
+      markTasksStaleNoRefetch(queryClient);
     },
-    onSettled: () => {
-      invalidateTaskQueries(queryClient);
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.previous) restoreSnapshot(queryClient, ctx.previous);
     },
   });
 };
@@ -172,34 +295,17 @@ export const useDeleteTask = () => {
   return useMutation({
     mutationFn: (taskId: string) => deleteTask(taskId),
     onMutate: async taskId => {
-      await queryClient.cancelQueries({ queryKey: ['tasks'] });
-      const previousTasks = queryClient.getQueryData<{
-        pages: Task[][];
-        pageParams: number[];
-      }>(ALL_TASKS_KEY);
-
-      if (previousTasks) {
-        queryClient.setQueryData(ALL_TASKS_KEY, (old: any) => {
-          if (!old) return old;
-          return {
-            ...old,
-            pages: old.pages.map((page: Task[]) =>
-              page.filter(task => task.id !== taskId),
-            ),
-          };
-        });
-      }
-
-      return { previousTasks };
+      await queryClient.cancelQueries({ queryKey: TASKS_ROOT_KEY });
+      const previous = snapshotTaskCaches(queryClient);
+      removeTaskFromCaches(queryClient, taskId);
+      return { previous };
     },
-    onError: (err, newTodo, context) => {
-      console.error('Delete Task Error:', err);
-      if (context?.previousTasks !== undefined) {
-        queryClient.setQueryData(ALL_TASKS_KEY, context.previousTasks);
-      }
+    onSuccess: () => {
+      invalidateDateBounds(queryClient);
+      markTasksStaleNoRefetch(queryClient);
     },
-    onSettled: () => {
-      invalidateTaskQueries(queryClient);
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.previous) restoreSnapshot(queryClient, ctx.previous);
     },
   });
 };
@@ -211,37 +317,16 @@ export const useUpdateTaskPositions = () => {
     mutationFn: (updates: { id: string; position: number }[]) =>
       updateTaskPositions(updates),
     onMutate: async updates => {
-      await queryClient.cancelQueries({ queryKey: ['tasks'] });
-      const previousTasks = queryClient.getQueryData<{
-        pages: Task[][];
-        pageParams: number[];
-      }>(ALL_TASKS_KEY);
-
-      if (previousTasks) {
-        queryClient.setQueryData(ALL_TASKS_KEY, (old: any) => {
-          if (!old) return old;
-          return {
-            ...old,
-            pages: old.pages.map((page: Task[]) =>
-              page.map(task => {
-                const update = updates.find(u => u.id === task.id);
-                return update ? { ...task, position: update.position } : task;
-              }),
-            ),
-          };
-        });
-      }
-
-      return { previousTasks };
+      await queryClient.cancelQueries({ queryKey: TASKS_ROOT_KEY });
+      const previous = snapshotTaskCaches(queryClient);
+      setAllTaskCaches(queryClient, old => applyPositionUpdates(old, updates));
+      return { previous };
     },
-    onError: (err, newTodo, context) => {
-      console.error('Update Position Error:', err);
-      if (context?.previousTasks !== undefined) {
-        queryClient.setQueryData(ALL_TASKS_KEY, context.previousTasks);
-      }
+    onSuccess: () => {
+      markTasksStaleNoRefetch(queryClient);
     },
-    onSettled: () => {
-      invalidateTaskQueries(queryClient);
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.previous) restoreSnapshot(queryClient, ctx.previous);
     },
   });
 };

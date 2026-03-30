@@ -2,6 +2,7 @@ import React from 'react';
 import { StyleSheet, Pressable, Platform } from 'react-native';
 import { Plus } from 'lucide-react-native';
 import { useTheme } from '../../../theme';
+import { useTaskScreenLayout } from '../hooks/useTaskScreenLayout';
 
 interface TaskFabProps {
   onPress: () => void;
@@ -11,14 +12,20 @@ interface TaskFabProps {
 
 export const TaskFab = ({ onPress, bottomInset, disabled }: TaskFabProps) => {
   const { colors, isDark } = useTheme();
+  const { fabEdgeInset, isCompact } = useTaskScreenLayout();
   const iconColor = isDark ? '#000000' : '#FFFFFF';
+  const fabSize = isCompact ? 52 : 56;
 
   return (
     <Pressable
       style={({ pressed }) => [
         styles.fab,
         {
-          bottom: 28 + bottomInset,
+          width: fabSize,
+          height: fabSize,
+          borderRadius: fabSize / 2,
+          right: fabEdgeInset,
+          bottom: fabEdgeInset + bottomInset,
           backgroundColor: colors.accent,
           opacity: disabled ? 0.5 : 1,
         },
@@ -35,7 +42,7 @@ export const TaskFab = ({ onPress, bottomInset, disabled }: TaskFabProps) => {
         foreground: true,
       }}
     >
-      <Plus size={26} color={iconColor} strokeWidth={2.4} />
+      <Plus size={isCompact ? 24 : 26} color={iconColor} strokeWidth={2.4} />
     </Pressable>
   );
 };
@@ -43,10 +50,6 @@ export const TaskFab = ({ onPress, bottomInset, disabled }: TaskFabProps) => {
 const styles = StyleSheet.create({
   fab: {
     position: 'absolute',
-    right: 28,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: Platform.OS === 'android' ? 'hidden' : 'visible',

@@ -1,7 +1,33 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
-import { Text, StyleSheet, Animated, Pressable } from 'react-native';
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useCallback,
+  useRef,
+  useEffect,
+} from 'react';
+import {
+  Text,
+  StyleSheet,
+  Animated,
+  Pressable,
+  Easing,
+  Platform,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { radius, spacing, typography, useTheme } from '../theme';
+import {
+  AlertCircle,
+  AlertTriangle,
+  CheckCircle2,
+  Info,
+} from 'lucide-react-native';
+import {
+  commonStyles,
+  radius,
+  spacing,
+  touchTargetMin,
+  useTheme,
+} from '../theme';
 
 type ToastType = 'success' | 'error' | 'info' | 'warning';
 
@@ -20,58 +46,138 @@ export const useToast = () => {
   return context;
 };
 
+const TOAST_DURATION_MS = 2600;
+
+const TOAST_ICONS: Record<
+  ToastType,
+  typeof Info
+> = {
+  success: CheckCircle2,
+  error: AlertCircle,
+  warning: AlertTriangle,
+  info: Info,
+};
+
 export const ToastProvider = ({ children }: { children: React.ReactNode }) => {
   const [message, setMessage] = useState('');
   const [type, setType] = useState<ToastType>('info');
   const [visible, setVisible] = useState(false);
-  const [fadeAnim] = useState(new Animated.Value(0));
+  const [fadeAnim] = useState(() => new Animated.Value(0));
+  /** Positive = shifted down; anchored at bottom so entering toast slides up into view. */
+  const [slideAnim] = useState(() => new Animated.Value(14));
+  const hideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** True while a toast is shown or dismissing — avoids blanking when messages stack. */
+  const bannerActiveRef = useRef(false);
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
 
+  useEffect(() => {
+    return () => {
+      if (hideTimeoutRef.current) {
+        clearTimeout(hideTimeoutRef.current);
+      }
+    };
+  }, []);
+
   const hideToast = useCallback(() => {
-    Animated.timing(fadeAnim, {
-      toValue: 0,
-      duration: 300,
-      useNativeDriver: true,
-    }).start(() => {
-      setVisible(false);
+    if (!bannerActiveRef.current) {
+      return;
+    }
+    if (hideTimeoutRef.current) {
+      clearTimeout(hideTimeoutRef.current);
+      hideTimeoutRef.current = null;
+    }
+    fadeAnim.stopAnimation();
+    slideAnim.stopAnimation();
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 0,
+        duration: 160,
+        easing: Easing.in(Easing.quad),
+        useNativeDriver: true,
+      }),
+      Animated.timing(slideAnim, {
+        toValue: 10,
+        duration: 160,
+        easing: Easing.in(Easing.quad),
+        useNativeDriver: true,
+      }),
+    ]).start(({ finished }) => {
+      if (finished) {
+        bannerActiveRef.current = false;
+        setVisible(false);
+      }
     });
-  }, [fadeAnim]);
+  }, [fadeAnim, slideAnim]);
 
   const showToast = useCallback(
     (msg: string, msgType: ToastType = 'info') => {
+      fadeAnim.stopAnimation();
+      slideAnim.stopAnimation();
+
+      if (hideTimeoutRef.current) {
+        clearTimeout(hideTimeoutRef.current);
+        hideTimeoutRef.current = null;
+      }
+
       setMessage(msg);
       setType(msgType);
-      setVisible(true);
 
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 300,
-        useNativeDriver: true,
-      }).start();
+      if (!bannerActiveRef.current) {
+        bannerActiveRef.current = true;
+        fadeAnim.setValue(0);
+        slideAnim.setValue(14);
+        setVisible(true);
+        Animated.parallel([
+          Animated.timing(fadeAnim, {
+            toValue: 1,
+            duration: 200,
+            easing: Easing.out(Easing.cubic),
+            useNativeDriver: true,
+          }),
+          Animated.timing(slideAnim, {
+            toValue: 0,
+            duration: 200,
+            easing: Easing.out(Easing.cubic),
+            useNativeDriver: true,
+          }),
+        ]).start();
+      } else {
+        fadeAnim.setValue(1);
+        slideAnim.setValue(0);
+        Animated.sequence([
+          Animated.timing(slideAnim, {
+            toValue: 4,
+            duration: 55,
+            easing: Easing.out(Easing.quad),
+            useNativeDriver: true,
+          }),
+          Animated.spring(slideAnim, {
+            toValue: 0,
+            friction: 8,
+            tension: 140,
+            useNativeDriver: true,
+          }),
+        ]).start();
+      }
 
-      // Auto hide after 3 seconds
-      const timer = setTimeout(() => {
+      hideTimeoutRef.current = setTimeout(() => {
         hideToast();
-      }, 3000);
-
-      return () => clearTimeout(timer);
+      }, TOAST_DURATION_MS);
     },
-    [fadeAnim, hideToast],
+    [fadeAnim, slideAnim, hideToast],
   );
 
-  const getBackgroundColor = () => {
-    switch (type) {
-      case 'success':
-        return colors.success;
-      case 'error':
-        return colors.error;
-      case 'warning':
-        return colors.warning;
-      default:
-        return colors.accent;
-    }
-  };
+  const accentColor =
+    type === 'success'
+      ? colors.success
+      : type === 'error'
+        ? colors.error
+        : type === 'warning'
+          ? colors.warning
+          : colors.accent;
+
+  const Icon = TOAST_ICONS[type];
 
   return (
     <ToastContext.Provider value={{ showToast, hideToast }}>
@@ -80,26 +186,28 @@ export const ToastProvider = ({ children }: { children: React.ReactNode }) => {
         <Animated.View
           accessibilityLiveRegion={type === 'error' ? 'assertive' : 'polite'}
           accessible={false}
+          pointerEvents="box-none"
           style={[
-            styles.container,
+            styles.viewport,
             {
+              bottom: insets.bottom + spacing.m,
               opacity: fadeAnim,
-              transform: [
-                {
-                  translateY: fadeAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [20, 0],
-                  }),
-                },
-              ],
-              bottom: insets.bottom + 20,
-              backgroundColor: getBackgroundColor(),
+              transform: [{ translateY: slideAnim }],
             },
           ]}
         >
           <Pressable
             onPress={hideToast}
-            style={({ pressed }) => [pressed && { opacity: 0.92 }]}
+            style={({ pressed }) => [
+              styles.banner,
+              {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+                opacity: pressed ? 0.94 : 1,
+              },
+              commonStyles.shadowSubtle,
+              Platform.OS === 'android' && styles.bannerAndroid,
+            ]}
             accessibilityRole={type === 'error' ? 'alert' : 'button'}
             accessibilityLabel={
               type === 'error'
@@ -107,7 +215,17 @@ export const ToastProvider = ({ children }: { children: React.ReactNode }) => {
                 : `${message}. Double tap to dismiss.`
             }
           >
-            <Text style={styles.text} accessible={false}>
+            <Icon
+              size={18}
+              color={accentColor}
+              strokeWidth={2.25}
+              style={styles.icon}
+            />
+            <Text
+              style={[styles.message, { color: colors.textPrimary }]}
+              numberOfLines={4}
+              accessible={false}
+            >
               {message}
             </Text>
           </Pressable>
@@ -118,27 +236,35 @@ export const ToastProvider = ({ children }: { children: React.ReactNode }) => {
 };
 
 const styles = StyleSheet.create({
-  container: {
+  viewport: {
     position: 'absolute',
-    left: 20,
-    right: 20,
-    paddingVertical: spacing.m + 2,
-    paddingHorizontal: spacing.l,
-    borderRadius: radius.l,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
+    left: spacing.m,
+    right: spacing.m,
     zIndex: 9999,
   },
-  text: {
-    ...typography.body,
-    color: '#FFFFFF',
-    textAlign: 'center',
+  banner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    borderRadius: radius.m,
+    borderWidth: StyleSheet.hairlineWidth,
+    overflow: 'hidden',
+    minHeight: touchTargetMin,
+    paddingVertical: spacing.s + 2,
+    paddingRight: spacing.m,
+  },
+  bannerAndroid: {
+    elevation: 3,
+  },
+  icon: {
+    marginLeft: spacing.m,
+    marginTop: spacing.xs / 2,
+  },
+  message: {
+    flex: 1,
+    marginLeft: spacing.s,
+    fontSize: 14,
     fontWeight: '500',
+    letterSpacing: 0.05,
+    lineHeight: 20,
   },
 });

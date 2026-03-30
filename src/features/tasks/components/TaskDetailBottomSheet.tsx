@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   Modal,
   View,
@@ -6,9 +6,9 @@ import {
   TouchableWithoutFeedback,
   Text,
   Animated,
-  Dimensions,
   PanResponder,
   ScrollView,
+  useWindowDimensions,
 } from 'react-native';
 import { Check } from 'lucide-react-native';
 import { Button } from '../../../components/Button';
@@ -20,16 +20,14 @@ import {
   getModalSafeBottomInset,
 } from '../../../theme';
 import { Task } from '../../../api/tasks';
-import { CategoryPill } from './CategoryPill';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTaskScreenLayout } from '../hooks/useTaskScreenLayout';
 
 interface TaskDetailBottomSheetProps {
   visible: boolean;
   task: Task | null;
   onClose: () => void;
 }
-
-const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 export const TaskDetailBottomSheet = ({
   visible,
@@ -38,15 +36,17 @@ export const TaskDetailBottomSheet = ({
 }: TaskDetailBottomSheetProps) => {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
+  const { isCompact, maxListContentWidth, isTablet } = useTaskScreenLayout();
 
-  const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
+  const slideAnim = useRef(new Animated.Value(windowHeight)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const isClosing = useRef(false);
 
   useEffect(() => {
     if (visible && task) {
       isClosing.current = false;
-      slideAnim.setValue(SCREEN_HEIGHT);
+      slideAnim.setValue(windowHeight);
       fadeAnim.setValue(0);
       Animated.parallel([
         Animated.spring(slideAnim, {
@@ -63,15 +63,15 @@ export const TaskDetailBottomSheet = ({
         }),
       ]).start();
     }
-  }, [visible, task, slideAnim, fadeAnim]);
+  }, [visible, task, slideAnim, fadeAnim, windowHeight]);
 
-  const handleClose = () => {
+  const handleClose = useCallback(() => {
     if (isClosing.current) return;
     isClosing.current = true;
 
     Animated.parallel([
       Animated.timing(slideAnim, {
-        toValue: SCREEN_HEIGHT,
+        toValue: windowHeight,
         duration: 250,
         useNativeDriver: true,
       }),
@@ -83,35 +83,43 @@ export const TaskDetailBottomSheet = ({
     ]).start(() => {
       onClose();
     });
-  };
+  }, [windowHeight, slideAnim, fadeAnim, onClose]);
 
-  const panResponder = useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponder: (_, gestureState) => gestureState.dy > 10,
-      onPanResponderMove: (_, gestureState) => {
-        if (gestureState.dy > 0) {
-          slideAnim.setValue(gestureState.dy);
-        }
-      },
-      onPanResponderRelease: (_, gestureState) => {
-        if (gestureState.dy > 100) {
-          handleClose();
-        } else {
-          Animated.spring(slideAnim, {
-            toValue: 0,
-            useNativeDriver: true,
-            friction: 8,
-            tension: 64,
-          }).start();
-        }
-      },
-    }),
-  ).current;
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_, gestureState) =>
+          gestureState.dy > 10,
+        onPanResponderMove: (_, gestureState) => {
+          if (gestureState.dy > 0) {
+            slideAnim.setValue(gestureState.dy);
+          }
+        },
+        onPanResponderRelease: (_, gestureState) => {
+          if (gestureState.dy > 100) {
+            handleClose();
+          } else {
+            Animated.spring(slideAnim, {
+              toValue: 0,
+              useNativeDriver: true,
+              friction: 8,
+              tension: 64,
+            }).start();
+          }
+        },
+      }),
+    [handleClose, slideAnim],
+  );
 
   if (!visible || !task) return null;
 
   const sheetBottomPad =
     getModalSafeBottomInset(insets.bottom) + spacing.l;
+  const sheetMaxHeight = Math.min(
+    windowHeight * 0.9,
+    windowHeight - Math.max(insets.top, spacing.m),
+  );
+  const sheetPadH = isCompact ? spacing.m : spacing.l;
 
   const created = new Date(task.created_at).toLocaleDateString(undefined, {
     weekday: 'long',
@@ -153,6 +161,11 @@ export const TaskDetailBottomSheet = ({
               backgroundColor: colors.card,
               transform: [{ translateY: slideAnim }],
               paddingBottom: sheetBottomPad,
+              paddingHorizontal: sheetPadH,
+              maxHeight: sheetMaxHeight,
+              maxWidth: isTablet ? maxListContentWidth : undefined,
+              width: '100%',
+              alignSelf: isTablet ? 'center' : undefined,
             },
           ]}
         >
@@ -209,6 +222,7 @@ export const TaskDetailBottomSheet = ({
                     textDecorationLine: 'line-through',
                   },
                 ]}
+                maxFontSizeMultiplier={1.6}
               >
                 {task.title}
               </Text>
@@ -221,6 +235,7 @@ export const TaskDetailBottomSheet = ({
               {task.description ? (
                 <Text
                   style={[styles.bodyText, { color: colors.textSecondary }]}
+                  maxFontSizeMultiplier={1.65}
                 >
                   {task.description}
                 </Text>
@@ -232,15 +247,6 @@ export const TaskDetailBottomSheet = ({
                 </Text>
               )}
             </View>
-
-            {task.category ? (
-              <View style={styles.section}>
-                <Text style={[styles.label, { color: colors.textSecondary }]}>
-                  Category
-                </Text>
-                <CategoryPill category={task.category} />
-              </View>
-            ) : null}
 
             <View style={styles.section}>
               <Text style={[styles.label, { color: colors.textSecondary }]}>
@@ -275,7 +281,6 @@ const styles = StyleSheet.create({
   sheetContainer: {
     borderTopLeftRadius: radius.l + 2,
     borderTopRightRadius: radius.l + 2,
-    paddingHorizontal: spacing.l,
     paddingTop: spacing.s,
     paddingBottom: 0,
     shadowColor: '#000',
@@ -283,7 +288,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.12,
     shadowRadius: 16,
     elevation: 24,
-    maxHeight: '88%',
   },
   dragHandleContainer: {
     alignItems: 'center',

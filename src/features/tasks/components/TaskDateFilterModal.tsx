@@ -6,6 +6,7 @@ import {
   Modal,
   Pressable,
   useWindowDimensions,
+  Platform,
 } from 'react-native';
 import { Calendar, DateData } from 'react-native-calendars';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -28,6 +29,7 @@ import {
   clampRangeToDataBounds,
   isValidDayKey,
 } from '../utils/taskDateFilter';
+import { useTaskScreenLayout } from '../hooks/useTaskScreenLayout';
 
 type Selection = { start: string; end: string | null };
 
@@ -51,8 +53,16 @@ export const TaskDateFilterModal = ({
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
+  const layout = useTaskScreenLayout();
   const { showToast } = useToast();
   const bottomPad = getModalSafeBottomInset(insets.bottom);
+  const sheetMaxH = Math.min(
+    height * (layout.isShortWindow ? 0.8 : 0.88),
+    Platform.OS === 'ios' ? height - insets.top - spacing.m : height - spacing.xl,
+  );
+  const sheetMaxW = layout.isTablet
+    ? Math.min(480, layout.width - layout.horizontalPadding * 2)
+    : undefined;
 
   const [selection, setSelection] = useState<Selection | null>(null);
 
@@ -149,7 +159,9 @@ export const TaskDateFilterModal = ({
       transparent
       onRequestClose={onClose}
     >
-      <View style={styles.root}>
+      <View
+        style={[styles.root, { paddingHorizontal: layout.horizontalPadding }]}
+      >
         <Pressable
           style={[styles.scrim, { backgroundColor: colors.overlay }]}
           onPress={onClose}
@@ -162,7 +174,10 @@ export const TaskDateFilterModal = ({
             {
               backgroundColor: colors.card,
               borderColor: colors.border,
-              maxHeight: height * 0.88,
+              maxHeight: sheetMaxH,
+              maxWidth: sheetMaxW ?? '100%',
+              width: '100%',
+              alignSelf: 'center',
               paddingBottom: bottomPad,
             },
           ]}
@@ -228,7 +243,6 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     justifyContent: 'center',
-    paddingHorizontal: spacing.m,
   },
   scrim: {
     ...StyleSheet.absoluteFillObject,

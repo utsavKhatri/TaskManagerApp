@@ -2,9 +2,7 @@ import { format } from 'date-fns';
 import { supabase } from './supabase';
 import { Database } from '../types/database';
 
-export type Task = Database['public']['Tables']['tasks']['Row'] & {
-  category?: Database['public']['Tables']['categories']['Row'] | null;
-};
+export type Task = Database['public']['Tables']['tasks']['Row'];
 export type NewTask = Database['public']['Tables']['tasks']['Insert'];
 export type UpdateTask = Database['public']['Tables']['tasks']['Update'];
 
@@ -71,8 +69,7 @@ export const fetchTasks = async ({
       created_at,
       user_id,
       category_id,
-      is_deleted,
-      category:categories(id, name, color, icon)
+      is_deleted
     `,
     )
     .eq('is_deleted', false);

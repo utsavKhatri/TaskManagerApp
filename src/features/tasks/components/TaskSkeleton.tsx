@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { View, StyleSheet, Dimensions } from 'react-native';
+import { View, StyleSheet, useWindowDimensions } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -8,8 +8,6 @@ import Animated, {
   withSequence,
 } from 'react-native-reanimated';
 import { useTheme, spacing, radius } from '../../../theme';
-
-const { width } = Dimensions.get('window');
 
 const SkeletonItem = ({
   width: itemWidth,
@@ -56,11 +54,19 @@ const SkeletonItem = ({
   );
 };
 
-export const TaskSkeleton = () => {
+interface TaskSkeletonProps {
+  horizontalPadding: number;
+}
+
+export const TaskSkeleton = ({ horizontalPadding }: TaskSkeletonProps) => {
   const { colors } = useTheme();
+  const { width } = useWindowDimensions();
+  const innerW = Math.max(120, width - horizontalPadding * 2);
 
   return (
-    <View style={styles.container}>
+    <View
+      style={[styles.container, { paddingHorizontal: horizontalPadding }]}
+    >
       {[1, 2, 3, 4, 5, 6, 7].map(key => (
         <View
           key={key}
@@ -83,9 +89,9 @@ export const TaskSkeleton = () => {
             style={styles.checkSk}
           />
           <View style={styles.textCol}>
-            <SkeletonItem width={width * 0.42} height={14} />
+            <SkeletonItem width={innerW * 0.48} height={14} />
             <SkeletonItem
-              width={width * 0.28}
+              width={innerW * 0.32}
               height={11}
               style={styles.line2}
             />
@@ -98,7 +104,6 @@ export const TaskSkeleton = () => {
 
 const styles = StyleSheet.create({
   container: {
-    paddingHorizontal: spacing.xl,
     paddingTop: spacing.m,
   },
   card: {
