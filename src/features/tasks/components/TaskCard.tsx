@@ -282,11 +282,7 @@ const styles = StyleSheet.create({
     minHeight: 80,
   },
   containerDragging: {
-    width: '90%',
-    alignSelf: 'center',
-    overflow: 'visible',
-    paddingVertical: spacing.xs,
-    transform: [{ scale: 1.01 }, { translateY: 2 }],
+    transform: [{ translateY: -1 }],
   },
   dragPressable: {
     alignSelf: 'stretch',

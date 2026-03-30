@@ -89,10 +89,17 @@ export const SwipeableTaskItem = React.memo(
     );
 
     return (
-      <View style={styles.itemRowSpacing}>
+      <View
+        style={[
+          styles.itemRowSpacing,
+          isActive && styles.itemRowDraggingWrap,
+        ]}
+      >
         <Swipeable
           ref={swipeableRef}
           enabled={!disabled}
+          /* Default is overflow:hidden — clips the active row bottom during DnD. */
+          containerStyle={isActive ? styles.swipeClipDrag : undefined}
           renderRightActions={renderRightActions}
           rightThreshold={42}
           overshootRight={false}
@@ -139,6 +146,14 @@ const styles = StyleSheet.create({
   /** Spacing between list rows lives outside Swipeable so action height matches the card, not card+gap. */
   itemRowSpacing: {
     marginBottom: spacing.m,
+  },
+  itemRowDraggingWrap: {
+    overflow: 'visible',
+    zIndex: 999,
+    elevation: 12,
+  },
+  swipeClipDrag: {
+    overflow: 'visible',
   },
   dragMeasureWrap: {
     overflow: 'visible',
