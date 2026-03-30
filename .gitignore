@@ -76,8 +76,6 @@ yarn-error.log
 .env
 .agent
 .agents
-android
-ios
 package-lock.json
 .bundle
 vendor
