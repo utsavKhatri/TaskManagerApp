@@ -23,7 +23,7 @@ export const useTaskList = () => {
     null,
   );
   const [isDateFilterModalVisible, setDateFilterModalVisible] = useState(false);
-  const { data: taskDateBounds } = useTaskDateBounds();
+  const { data: taskDateBounds } = useTaskDateBounds(user?.id);
 
   const {
     data,
@@ -34,7 +34,7 @@ export const useTaskList = () => {
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
-  } = useTasks(taskDateRange);
+  } = useTasks(taskDateRange, user?.id);
 
   const dateBadgeLabel = useMemo(
     () => formatTaskDateBadge(taskDateRange),

@@ -56,10 +56,7 @@ alter table public.tasks enable row level security;
 alter table public.categories enable row level security;
 
 create policy "Users can view their own tasks" on public.tasks
-  for select using (
-    (select auth.uid()) = user_id
-    and is_deleted = false
-  );
+  for select using ((select auth.uid()) = user_id);
 
 create policy "Users can insert their own tasks" on public.tasks
   for insert with check ((select auth.uid()) = user_id);

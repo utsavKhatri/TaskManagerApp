@@ -1,5 +1,13 @@
-import React, { createContext, useEffect, useState, ReactNode } from 'react';
+import React, {
+  createContext,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  ReactNode,
+} from 'react';
 import { Session, User } from '@supabase/supabase-js';
+import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../../api/supabase';
 import { TasksRealtimeSync } from '../tasks/hooks/TasksRealtimeSync';
 
@@ -18,17 +26,34 @@ export const AuthContext = createContext<AuthContextType>({
 });
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
+  const queryClient = useQueryClient();
   const [session, setSession] = useState<Session | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  /** Tracks last known user id so we clear React Query when identity changes (logout or account switch). */
+  const prevUserIdRef = useRef<string | undefined>(undefined);
+
+  const applySession = useCallback(
+    (currentSession: Session | null) => {
+      const newId = currentSession?.user?.id;
+      const prevId = prevUserIdRef.current;
+      // Logout (newId undefined), account switch, or re-login as different user
+      if (prevId !== undefined && newId !== prevId) {
+        queryClient.clear();
+      }
+      prevUserIdRef.current = newId;
+      setSession(currentSession);
+      setIsLoading(false);
+    },
+    [queryClient],
+  );
 
   useEffect(() => {
-    // 1. Check initial session
     const initializeAuth = async () => {
       try {
         const {
           data: { session: initialSession },
         } = await supabase.auth.getSession();
-        setSession(initialSession);
+        applySession(initialSession);
       } catch (error) {
         console.error('Error fetching session:', error);
       } finally {
@@ -41,12 +66,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, currentSession) => {
-      setSession(currentSession);
-      setIsLoading(false);
+      applySession(currentSession);
     });
 
     return () => subscription.unsubscribe();
-  }, []);
+  }, [applySession]);
 
   const signOut = async () => {
     await supabase.auth.signOut();

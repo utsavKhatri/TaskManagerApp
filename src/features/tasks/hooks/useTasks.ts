@@ -24,13 +24,17 @@ import {
   isValidDayKey,
 } from '../utils/taskDateFilter';
 import type { TaskDateRange } from '../utils/taskDateFilter';
+import { useAuth } from '../../../hooks/useAuth';
 
 export const tasksFilterKey = (range: TaskDateRange | null) =>
   range == null ? 'all' : `${range.start}_${range.end}`;
 
 type TasksInfiniteData = InfiniteData<Task[]>;
 
-const TASKS_ROOT_KEY = ['tasks'] as const;
+/** React Query prefix for one user's task lists — isolates cache per account. */
+export function tasksRootQueryKey(userId: string) {
+  return ['tasks', userId] as const;
+}
 
 /** Optimistic create ids removed before the server responds — skip reconcile and clean up if create completes later. */
 const abortedOptimisticCreateIds = new Set<string>();
@@ -55,7 +59,7 @@ function repaginate(flat: Task[], limit: number): Task[][] {
 
 /** Whether a task belongs in a cached list for this query key (date filter). */
 function taskMatchesTasksQuery(queryKey: QueryKey, task: Task): boolean {
-  const suffix = queryKey[1];
+  const suffix = queryKey[2];
   if (suffix === 'all' || typeof suffix !== 'string') return true;
   const idx = suffix.indexOf('_');
   if (idx === -1) return true;
@@ -70,8 +74,11 @@ function taskMatchesTasksQuery(queryKey: QueryKey, task: Task): boolean {
 
 function snapshotTaskCaches(
   queryClient: ReturnType<typeof useQueryClient>,
+  userId: string,
 ): [QueryKey, TasksInfiniteData | undefined][] {
-  return queryClient.getQueriesData<TasksInfiniteData>({ queryKey: TASKS_ROOT_KEY });
+  return queryClient.getQueriesData<TasksInfiniteData>({
+    queryKey: tasksRootQueryKey(userId),
+  });
 }
 
 function restoreSnapshot(
@@ -85,13 +92,14 @@ function restoreSnapshot(
 
 function setAllTaskCaches(
   queryClient: ReturnType<typeof useQueryClient>,
+  userId: string,
   updater: (
     data: TasksInfiniteData,
     queryKey: QueryKey,
   ) => TasksInfiniteData | undefined,
 ) {
   const entries = queryClient.getQueriesData<TasksInfiniteData>({
-    queryKey: TASKS_ROOT_KEY,
+    queryKey: tasksRootQueryKey(userId),
   });
   entries.forEach(([queryKey, old]) => {
     if (!old || !isTasksInfiniteData(old)) return;
@@ -105,10 +113,11 @@ function setAllTaskCaches(
 /** Replace temp optimistic id with server task; fix pagination. */
 function reconcileCreateSuccess(
   queryClient: ReturnType<typeof useQueryClient>,
+  userId: string,
   tempId: string,
   serverTask: Task,
 ) {
-  setAllTaskCaches(queryClient, (old, queryKey) => {
+  setAllTaskCaches(queryClient, userId, (old, queryKey) => {
     const flat = old.pages.flat().filter(t => t.id !== tempId && t.id !== serverTask.id);
     const nextFlat = taskMatchesTasksQuery(queryKey, serverTask)
       ? [...flat, serverTask].sort((a, b) => a.position - b.position)
@@ -123,12 +132,13 @@ function reconcileCreateSuccess(
 
 function patchTaskInCaches(
   queryClient: ReturnType<typeof useQueryClient>,
+  userId: string,
   taskId: string,
   patch: Partial<Task>,
   serverTask?: Task,
 ) {
   const merged = serverTask;
-  setAllTaskCaches(queryClient, old => ({
+  setAllTaskCaches(queryClient, userId, old => ({
     ...old,
     pages: old.pages.map(page =>
       page.map(t => {
@@ -139,8 +149,12 @@ function patchTaskInCaches(
   }));
 }
 
-function removeTaskFromCaches(queryClient: ReturnType<typeof useQueryClient>, taskId: string) {
-  setAllTaskCaches(queryClient, old => {
+function removeTaskFromCaches(
+  queryClient: ReturnType<typeof useQueryClient>,
+  userId: string,
+  taskId: string,
+) {
+  setAllTaskCaches(queryClient, userId, old => {
     const flat = old.pages.flat().filter(t => t.id !== taskId);
     const pages = repaginate(flat, TASKS_PAGE_LIMIT);
     return {
@@ -175,18 +189,30 @@ function applyPositionUpdates(
   };
 }
 
-const invalidateDateBounds = (queryClient: ReturnType<typeof useQueryClient>) => {
-  queryClient.invalidateQueries({ queryKey: ['task-date-bounds'] });
+const invalidateDateBounds = (
+  queryClient: ReturnType<typeof useQueryClient>,
+  userId: string,
+) => {
+  queryClient.invalidateQueries({ queryKey: ['task-date-bounds', userId] });
 };
 
-const markTasksStaleNoRefetch = (queryClient: ReturnType<typeof useQueryClient>) => {
-  queryClient.invalidateQueries({ queryKey: TASKS_ROOT_KEY, refetchType: 'none' });
+const markTasksStaleNoRefetch = (
+  queryClient: ReturnType<typeof useQueryClient>,
+  userId: string,
+) => {
+  queryClient.invalidateQueries({
+    queryKey: tasksRootQueryKey(userId),
+    refetchType: 'none',
+  });
 };
 
-export const useTasks = (dateRange: TaskDateRange | null) => {
+export const useTasks = (
+  dateRange: TaskDateRange | null,
+  userId: string | undefined,
+) => {
   const filterKey = tasksFilterKey(dateRange);
   return useInfiniteQuery({
-    queryKey: ['tasks', filterKey],
+    queryKey: ['tasks', userId ?? '', filterKey],
     queryFn: ({ pageParam = 0 }) =>
       fetchTasks({
         pageParam,
@@ -198,6 +224,7 @@ export const useTasks = (dateRange: TaskDateRange | null) => {
             }
           : {}),
       }),
+    enabled: !!userId,
     initialPageParam: 0,
     maxPages: 6,
     staleTime: 60 * 1000,
@@ -208,21 +235,30 @@ export const useTasks = (dateRange: TaskDateRange | null) => {
   });
 };
 
-export const useTaskDateBounds = () =>
+export const useTaskDateBounds = (userId: string | undefined) =>
   useQuery({
-    queryKey: ['task-date-bounds'],
+    queryKey: ['task-date-bounds', userId ?? ''],
     queryFn: fetchUserTaskDateBounds,
+    enabled: !!userId,
     staleTime: 5 * 60 * 1000,
   });
 
 export const useCreateTask = () => {
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const userId = user?.id;
 
   return useMutation({
-    mutationFn: (newTask: NewTask) => createTask(newTask),
+    mutationFn: (newTask: NewTask) => {
+      if (!userId) {
+        return Promise.reject(new Error('Not signed in'));
+      }
+      return createTask(newTask);
+    },
     onMutate: async newTask => {
-      await queryClient.cancelQueries({ queryKey: TASKS_ROOT_KEY });
-      const previous = snapshotTaskCaches(queryClient);
+      if (!userId) return {};
+      await queryClient.cancelQueries({ queryKey: tasksRootQueryKey(userId) });
+      const previous = snapshotTaskCaches(queryClient, userId);
       const tempId = `temp-${Date.now()}`;
       const optimisticTask: Task = {
         id: tempId,
@@ -238,7 +274,7 @@ export const useCreateTask = () => {
         position: 0,
       };
 
-      setAllTaskCaches(queryClient, (old, queryKey) => {
+      setAllTaskCaches(queryClient, userId, (old, queryKey) => {
         if (!taskMatchesTasksQuery(queryKey, optimisticTask)) return old;
         const flat = old.pages.flat().map(t => ({
           ...t,
@@ -252,18 +288,19 @@ export const useCreateTask = () => {
       return { previous, tempId };
     },
     onSuccess: (serverTask, _vars, ctx) => {
+      if (!userId) return;
       if (ctx?.tempId && abortedOptimisticCreateIds.has(ctx.tempId)) {
         abortedOptimisticCreateIds.delete(ctx.tempId);
-        void deleteTask(serverTask.id);
-        invalidateDateBounds(queryClient);
-        markTasksStaleNoRefetch(queryClient);
+        deleteTask(serverTask.id).catch(() => undefined);
+        invalidateDateBounds(queryClient, userId);
+        markTasksStaleNoRefetch(queryClient, userId);
         return;
       }
       if (ctx?.tempId) {
-        reconcileCreateSuccess(queryClient, ctx.tempId, serverTask);
+        reconcileCreateSuccess(queryClient, userId, ctx.tempId, serverTask);
       }
-      invalidateDateBounds(queryClient);
-      markTasksStaleNoRefetch(queryClient);
+      invalidateDateBounds(queryClient, userId);
+      markTasksStaleNoRefetch(queryClient, userId);
     },
     onError: (_err, _vars, ctx) => {
       if (ctx?.tempId) abortedOptimisticCreateIds.delete(ctx.tempId);
@@ -274,25 +311,30 @@ export const useCreateTask = () => {
 
 export const useUpdateTask = () => {
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const userId = user?.id;
 
   return useMutation({
     mutationFn: (updatedTask: UpdateTask) => updateTask(updatedTask),
     onMutate: async updatedTask => {
-      await queryClient.cancelQueries({ queryKey: TASKS_ROOT_KEY });
-      const previous = snapshotTaskCaches(queryClient);
+      if (!userId) return {};
+      await queryClient.cancelQueries({ queryKey: tasksRootQueryKey(userId) });
+      const previous = snapshotTaskCaches(queryClient, userId);
       if (!updatedTask.id) return { previous };
 
       patchTaskInCaches(
         queryClient,
+        userId,
         updatedTask.id,
         updatedTask as Partial<Task>,
       );
       return { previous };
     },
     onSuccess: data => {
-      patchTaskInCaches(queryClient, data.id, {}, data);
-      invalidateDateBounds(queryClient);
-      markTasksStaleNoRefetch(queryClient);
+      if (!userId) return;
+      patchTaskInCaches(queryClient, userId, data.id, {}, data);
+      invalidateDateBounds(queryClient, userId);
+      markTasksStaleNoRefetch(queryClient, userId);
     },
     onError: (_err, _vars, ctx) => {
       if (ctx?.previous) restoreSnapshot(queryClient, ctx.previous);
@@ -302,6 +344,8 @@ export const useUpdateTask = () => {
 
 export const useDeleteTask = () => {
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const userId = user?.id;
 
   return useMutation({
     mutationFn: async (taskId: string) => {
@@ -312,14 +356,16 @@ export const useDeleteTask = () => {
       return deleteTask(taskId);
     },
     onMutate: async taskId => {
-      await queryClient.cancelQueries({ queryKey: TASKS_ROOT_KEY });
-      const previous = snapshotTaskCaches(queryClient);
-      removeTaskFromCaches(queryClient, taskId);
+      if (!userId) return {};
+      await queryClient.cancelQueries({ queryKey: tasksRootQueryKey(userId) });
+      const previous = snapshotTaskCaches(queryClient, userId);
+      removeTaskFromCaches(queryClient, userId, taskId);
       return { previous };
     },
     onSuccess: () => {
-      invalidateDateBounds(queryClient);
-      markTasksStaleNoRefetch(queryClient);
+      if (!userId) return;
+      invalidateDateBounds(queryClient, userId);
+      markTasksStaleNoRefetch(queryClient, userId);
     },
     onError: (_err, _vars, ctx) => {
       if (ctx?.previous) restoreSnapshot(queryClient, ctx.previous);
@@ -329,18 +375,24 @@ export const useDeleteTask = () => {
 
 export const useUpdateTaskPositions = () => {
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const userId = user?.id;
 
   return useMutation({
     mutationFn: (updates: { id: string; position: number }[]) =>
       updateTaskPositions(updates),
     onMutate: async updates => {
-      await queryClient.cancelQueries({ queryKey: TASKS_ROOT_KEY });
-      const previous = snapshotTaskCaches(queryClient);
-      setAllTaskCaches(queryClient, old => applyPositionUpdates(old, updates));
+      if (!userId) return {};
+      await queryClient.cancelQueries({ queryKey: tasksRootQueryKey(userId) });
+      const previous = snapshotTaskCaches(queryClient, userId);
+      setAllTaskCaches(queryClient, userId, old =>
+        applyPositionUpdates(old, updates),
+      );
       return { previous };
     },
     onSuccess: () => {
-      markTasksStaleNoRefetch(queryClient);
+      if (!userId) return;
+      markTasksStaleNoRefetch(queryClient, userId);
     },
     onError: (_err, _vars, ctx) => {
       if (ctx?.previous) restoreSnapshot(queryClient, ctx.previous);
