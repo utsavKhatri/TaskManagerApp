@@ -4,6 +4,7 @@ TaskManagerApp is a React Native mobile app with Supabase authentication and dat
 
 ## Quick Navigation
 
+- **Demo video (screen recording):** [`docs/demo/app-demo-2026-04-02.mp4`](docs/demo/app-demo-2026-04-02.mp4) — see [`docs/demo.md`](docs/demo.md) for notes
 - Docs index: [`docs/README.md`](docs/README.md)
 - Supabase setup and RLS: [`docs/supabase-setup-guide.md`](docs/supabase-setup-guide.md)
 - Authentication flow: [`docs/authentication-flow.md`](docs/authentication-flow.md)

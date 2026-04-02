@@ -1,5 +1,10 @@
 # Project Documentation Index
 
+## Demo
+
+- Screen recording of the app: [`demo/app-demo-2026-04-02.mp4`](./demo/app-demo-2026-04-02.mp4)
+- Description and viewing notes: [demo.md](./demo.md)
+
 ## Deliverables
 
 ### Source Code Deliverables
