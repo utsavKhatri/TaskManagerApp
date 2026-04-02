@@ -4,6 +4,7 @@ import { Pressable } from 'react-native-gesture-handler';
 import { ScaleDecorator } from 'react-native-draggable-flatlist';
 import Swipeable, {
   SwipeableMethods,
+  SwipeDirection,
 } from 'react-native-gesture-handler/ReanimatedSwipeable';
 import { Trash2 } from 'lucide-react-native';
 import { TaskCard } from './TaskCard';
@@ -104,7 +105,10 @@ export const SwipeableTaskItem = React.memo(
           rightThreshold={42}
           overshootRight={false}
           onSwipeableOpen={direction => {
-            if (direction === 'right') {
+            // ReanimatedSwipeable: `renderRightActions` opens with SwipeDirection.LEFT
+            // (negative row translation). Classic Swipeable used 'right' here — that
+            // mismatch meant this never ran.
+            if (direction === SwipeDirection.LEFT) {
               requestDeleteConfirm();
             }
           }}

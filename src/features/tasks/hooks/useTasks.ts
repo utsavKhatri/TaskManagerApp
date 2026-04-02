@@ -32,6 +32,9 @@ type TasksInfiniteData = InfiniteData<Task[]>;
 
 const TASKS_ROOT_KEY = ['tasks'] as const;
 
+/** Optimistic create ids removed before the server responds — skip reconcile and clean up if create completes later. */
+const abortedOptimisticCreateIds = new Set<string>();
+
 function isTasksInfiniteData(data: unknown): data is TasksInfiniteData {
   return (
     !!data &&
@@ -249,6 +252,13 @@ export const useCreateTask = () => {
       return { previous, tempId };
     },
     onSuccess: (serverTask, _vars, ctx) => {
+      if (ctx?.tempId && abortedOptimisticCreateIds.has(ctx.tempId)) {
+        abortedOptimisticCreateIds.delete(ctx.tempId);
+        void deleteTask(serverTask.id);
+        invalidateDateBounds(queryClient);
+        markTasksStaleNoRefetch(queryClient);
+        return;
+      }
       if (ctx?.tempId) {
         reconcileCreateSuccess(queryClient, ctx.tempId, serverTask);
       }
@@ -256,6 +266,7 @@ export const useCreateTask = () => {
       markTasksStaleNoRefetch(queryClient);
     },
     onError: (_err, _vars, ctx) => {
+      if (ctx?.tempId) abortedOptimisticCreateIds.delete(ctx.tempId);
       if (ctx?.previous) restoreSnapshot(queryClient, ctx.previous);
     },
   });
@@ -293,7 +304,13 @@ export const useDeleteTask = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (taskId: string) => deleteTask(taskId),
+    mutationFn: async (taskId: string) => {
+      if (taskId.startsWith('temp-')) {
+        abortedOptimisticCreateIds.add(taskId);
+        return {} as Task;
+      }
+      return deleteTask(taskId);
+    },
     onMutate: async taskId => {
       await queryClient.cancelQueries({ queryKey: TASKS_ROOT_KEY });
       const previous = snapshotTaskCaches(queryClient);

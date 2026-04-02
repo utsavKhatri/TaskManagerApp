@@ -207,11 +207,15 @@ export const useTaskList = () => {
         {
           text: 'Delete',
           style: 'destructive',
-          onPress: () => deleteTaskMutation.mutate(taskId),
+          onPress: () =>
+            deleteTaskMutation.mutate(taskId, {
+              onSuccess: () => showToast('Task deleted', 'success'),
+              onError: err => showToast(err.message, 'error'),
+            }),
         },
       ]);
     },
-    [deleteTaskMutation],
+    [deleteTaskMutation, showToast],
   );
 
   const onRefresh = useCallback(() => {
